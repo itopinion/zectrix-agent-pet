@@ -1,0 +1,17 @@
+{
+  "id": "zectrix-agent-pet",
+  "name": "Agent 宠物",
+  "version": "0.3.2",
+  "api_version": 1,
+  "platforms": [
+    "macos-aarch64"
+  ],
+  "entry": "bin/zectrix-agent-pet",
+  "capabilities": [
+    "display",
+    "keys",
+    "audio"
+  ],
+  "description": "让像素工作搭子显示真实 Agent 任务状态；支持本机 Codex 跟随与通用事件上报。",
+  "files": {}
+}

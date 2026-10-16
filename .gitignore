@@ -1,0 +1,18 @@
+/target/
+/dist/
+__pycache__/
+*.pyc
+.DS_Store
+agent-connection.json
+state.json
+
+# Local credentials, runtime data and distributables
+.env
+.env.*
+!.env.example
+/app-data/
+/logs/
+approval-hook-state.json
+*.log
+*.zip
+*.zip.sha256
