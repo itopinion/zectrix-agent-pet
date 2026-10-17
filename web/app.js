@@ -14,16 +14,17 @@ function effective(t){return t.stale&&!['done','error','stopped'].includes(t.eve
 function taskLabel(t){return effective(t)==='waiting'&&t.event.detail.startsWith('权限审批')?'等待权限审批':labels[effective(t)];}
 function source(t){return t.source==='codex'?'Codex 本机':t.source==='demo'?'演示':t.event.agent||'Agent 上报';}
 function timestamp(t){return new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function idleHint(s){if(!s.settings.codex_enabled)return '本机 Codex 跟随已关闭，可在「接入 Agent」中开启，或让其他 Agent 上报状态。';if(s.health.codex==='watching')return '已自动跟随本机 Codex。开始一个任务后，状态会显示在这里。';if(!s.health.codex||s.health.codex==='disabled')return '正在连接本机 Codex，请稍候。';return '暂未接入本机 Codex：'+s.health.codex+'。也可在「接入 Agent」中配置其他 Agent。';}
 function render(s){
  state=s;const t=s.current,st=t?effective(t):null;
- $('current-state').textContent=t?taskLabel(t):'等你回来';$('status-icon').textContent=symbols[st]||'○';
+ $('current-state').textContent=t?taskLabel(t):'等待任务';$('status-icon').textContent=symbols[st]||'○';
  const many=!s.demo&&s.running.length>1;
- $('current-title').textContent=many?s.running.length+' 个任务正在进行':t?t.event.title:'让你的 Agent 来报个到。';
+ $('current-title').textContent=many?s.running.length+' 个任务正在进行':t?t.event.title:s.settings.codex_enabled?'Codex 跟随已开启':'本机 Codex 跟随已关闭';
  const running=$('running-tasks');running.replaceChildren();running.hidden=!many;
  if(many)for(const task of s.running){const row=document.createElement('div');const label=document.createElement('small');label.textContent=taskLabel(task);const name=document.createElement('span');name.textContent=task.event.title;row.append(label,name);running.append(row);}
  $('current-detail').hidden=many;
- $('current-detail').textContent=t?(st==='unknown'?'一段时间未收到更新，请回到 Agent 确认。':t.event.detail||'等待 Agent 的下一次更新。'):'开启本机 Codex 跟随，或让其他 Agent 上报任务状态。';
- $('source-tag').textContent=t?source(t):'尚未接入';$('mode-badge').textContent=s.demo?'演示模式':'实时状态';
+ $('current-detail').textContent=t?(st==='unknown'?'一段时间未收到更新，请回到 Agent 确认。':t.event.detail||'等待 Agent 的下一次更新。'):idleHint(s);
+ $('source-tag').textContent=t?source(t):s.settings.codex_enabled?'Codex 本机':'尚未接入';$('mode-badge').textContent=s.demo?'演示模式':'实时状态';
  $('auto-follow').textContent=s.selected?'回到自动跟随':'正在自动跟随';
  const p=t?.event.progress;$('progress-section').hidden=many||p===null||p===undefined;$('progress').value=p??0;$('progress-number').textContent=(p??0)+'%';
  $('updated').textContent=t?'最近更新 '+timestamp(t.updated_at):'还没有收到任务';
@@ -37,7 +38,7 @@ function render(s){
  $('task-count').textContent=s.tasks.length;
  const list=$('tasks');
  if(s.tasks.length){list.replaceChildren();for(const task of s.tasks){const key=task.source+':'+task.event.task_id;const b=document.createElement('button');b.className='task-row';b.classList.toggle('selected',t&&t.source===task.source&&t.event.task_id===task.event.task_id);b.setAttribute('aria-label','显示任务：'+task.event.title);const data=[['state',taskLabel(task)],['title',task.event.title],['source',source(task)],['date',timestamp(task.updated_at)]];for(const [cls,value]of data){const span=document.createElement('span');span.className=cls;span.textContent=value;b.append(span);}b.onclick=()=>mutate('/api/select',{key});list.append(b);}}
- else if(!list.querySelector('.empty')){list.replaceChildren();const d=document.createElement('div');d.className='empty';d.textContent='还没有任务。开启本机 Codex 跟随，或在「接入 Agent」中复制接入说明。';list.append(d);}
+ else{list.replaceChildren();const d=document.createElement('div');d.className='empty';d.textContent='还没有任务。'+idleHint(s);list.append(d);}
  $('command').textContent=command();
 }
 function quote(s){return "'"+s.replaceAll("'","'\\''")+"'";}

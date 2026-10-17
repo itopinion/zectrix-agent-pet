@@ -6,7 +6,7 @@
 
 ## 首次启用
 
-1. 在 Hub 运行本应用，并开启本机 Codex 跟随。
+1. 在 Hub 运行本应用，确认本机 Codex 跟随已开启（新安装默认开启）。
 2. 运行包内 `scripts/install_approval_hooks.py`，传入本机 Codex 目录和应用页面给出的连接文件：
 
 ```sh

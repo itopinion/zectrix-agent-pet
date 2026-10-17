@@ -1,7 +1,7 @@
 {
   "id": "zectrix-agent-pet",
   "name": "Agent 宠物",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "api_version": 1,
   "platforms": [
     "macos-aarch64"

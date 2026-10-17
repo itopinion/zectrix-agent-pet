@@ -81,7 +81,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            codex_enabled: false,
+            codex_enabled: true,
             animation: true,
             stale_minutes: 15,
             sound_enabled: true,
@@ -91,6 +91,8 @@ impl Default for Settings {
 }
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 pub struct Model {
+    #[serde(default)]
+    pub codex_history_version: u32,
     #[serde(default)]
     pub approvals: crate::approval::Approvals,
     #[serde(default)]
@@ -119,6 +121,17 @@ pub fn clean(s: &str, max: usize) -> String {
 pub const TASKS_PER_PAGE: usize = 4;
 
 impl Model {
+    /// v0 could persist copied subagent aborts as terminal parent state. Rebuild
+    /// this derived cache once; external Agent events and settings are retained.
+    pub fn migrate_codex_history(&mut self) -> bool {
+        if self.codex_history_version >= 1 {
+            return false;
+        }
+        self.tasks.retain(|t| t.source != "codex");
+        self.codex_history_version = 1;
+        true
+    }
+
     pub fn apply(&mut self, mut event: Event, source: &str, at: i64) -> Result<bool> {
         if !valid_id(&event.task_id) || event.seq == 0 {
             bail!("task_id 须为字母、数字或 -_: .，seq 须大于 0")
@@ -343,6 +356,23 @@ mod tests {
         }
     }
     #[test]
+    fn rebuilds_legacy_codex_cache_once_without_losing_agent_tasks_or_settings() {
+        let mut m = Model::default();
+        m.settings.codex_enabled = true;
+        m.settings.volume = 35;
+        m.apply(ev(1, Status::Stopped), "codex", 100).unwrap();
+        m.apply(ev(1, Status::Done), "agent", 100).unwrap();
+        assert!(m.migrate_codex_history());
+        assert_eq!(m.tasks.len(), 1);
+        assert_eq!(m.tasks[0].source, "agent");
+        assert!(m.settings.codex_enabled);
+        assert_eq!(m.settings.volume, 35);
+        m.apply(ev(2, Status::Working), "codex", 101).unwrap();
+        let mut restored: Model = serde_json::from_slice(&serde_json::to_vec(&m).unwrap()).unwrap();
+        assert!(!restored.migrate_codex_history());
+        assert_eq!(restored.tasks.len(), 2);
+    }
+    #[test]
     fn approval_keeps_task_name_and_survives_work_heartbeats() {
         let mut m = Model::default();
         m.settings.codex_enabled = true;
@@ -425,6 +455,7 @@ mod tests {
     #[test]
     fn sources_are_isolated_and_demo_is_not_persisted() {
         let mut m = Model::default();
+        m.settings.codex_enabled = false;
         m.apply(ev(1, Status::Working), "codex", 10).unwrap();
         assert!(m.current(11).is_none());
         m.apply(ev(1, Status::Waiting), "agent", 11).unwrap();

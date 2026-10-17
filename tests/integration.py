@@ -67,6 +67,8 @@ with tempfile.TemporaryDirectory(prefix='agent-pet-test-') as folder:
     def launch():return subprocess.Popen([str(binary)],env=env,stdout=log,stderr=log)
     try:
         process=launch();boot=wait(lambda:call(url,'/api/boot')[1]);browser={'X-App-Token':boot['token']}
+        assert call(url,'/api/status')[1]['settings']['codex_enabled'] is True
+        wait(lambda:call(url,'/api/status')[1]['health']['codex']=='watching')
         conn=json.loads((data/'agent-connection.json').read_text());agent={'Authorization':'Bearer '+conn['token']}
         assert 'hub-test-secret' not in json.dumps(boot);assert 'token' not in call(url,'/api/status')[1];assert (data/'agent-connection.json').stat().st_mode&0o777==0o600
         event={'task_id':'test-1','seq':1,'status':'working','title':'测试任务','agent':'Test','progress':None}
@@ -111,11 +113,10 @@ with tempfile.TemporaryDirectory(prefix='agent-pet-test-') as folder:
         checks.append('inactive app does not present; reactivation uses current lease')
         task=lambda kind:{'type':'event_msg','timestamp':datetime.now(timezone.utc).isoformat(),'payload':{'type':kind,'turn_id':'codex-turn-1'}}
         session=sessions/'session.jsonl';session.write_text(json.dumps(task('task_started'))+'\n')
-        call(url,'/api/settings',{'codex_enabled':True,'animation':False,'stale_minutes':15},browser)
         wait(lambda:any(t['source']=='codex' and t['event']['status']=='working' for t in call(url,'/api/status')[1]['tasks']))
         with session.open('a') as f:f.write(json.dumps(task('task_complete'))+'\n')
         wait(lambda:any(t['source']=='codex' and t['event']['status']=='done' for t in call(url,'/api/status')[1]['tasks']))
-        checks.append('Codex lifecycle file ingestion, explicit completion')
+        checks.append('fresh install follows Codex without a settings change; explicit completion')
         audio_before_restart=len(state['audio'])
         process.terminate();process.wait(timeout=6);assert not (data/'agent-connection.json').exists()
         process=launch();boot2=wait(lambda:call(url,'/api/boot')[1]);assert boot2['token']!=boot['token'];assert len(call(url,'/api/status')[1]['tasks'])==2
@@ -163,6 +164,15 @@ with tempfile.TemporaryDirectory(prefix='agent-pet-test-') as folder:
         assert 'private-command-secret' not in (data/'approval-hook-state.json').read_text()
         assert call(url,'/api/approvals',{'event':'PermissionRequest'})[0]==401
         checks.append('official-hook adapter: title, chime, dedup, heartbeat overlay, resolution, no approval decisions or command leakage')
+        settings=call(url,'/api/status')[1]['settings']
+        assert call(url,'/api/settings',{**settings,'codex_enabled':False},browser)[0]==200
+        process.terminate();process.wait(timeout=6)
+        process=launch();wait(lambda:call(url,'/api/boot')[1])
+        wait(lambda:call(url,'/api/status')[1]['health']['codex']=='disabled')
+        disabled=call(url,'/api/status')[1]
+        assert disabled['settings']['codex_enabled'] is False
+        assert all(t['source']!='codex' for t in disabled['tasks'])
+        checks.append('explicit Codex opt-out persists across restart')
         print(json.dumps({'passed':len(checks),'checks':checks},ensure_ascii=False,indent=2))
     finally:
         if process and process.poll() is None:process.terminate();process.wait(timeout=6)

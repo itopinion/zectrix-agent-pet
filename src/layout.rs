@@ -179,12 +179,16 @@ pub fn draw(model: &Model, now: i64, frame: usize) -> Value {
             text(&mut e, &status, 20, y + 16, 11, 220);
         }
     } else {
-        let headline = t.as_ref().map(|t| t.label()).unwrap_or("等你回来");
+        let headline = t.as_ref().map(|t| t.label()).unwrap_or("等待任务");
         text(&mut e, headline, 20, 116, 22, 224);
-        let title = t
-            .as_ref()
-            .map(|t| t.event.title.as_str())
-            .unwrap_or("今天，也一起做点事。");
+        let title =
+            t.as_ref()
+                .map(|t| t.event.title.as_str())
+                .unwrap_or(if model.settings.codex_enabled {
+                    "Codex 跟随已开启"
+                } else {
+                    "本机 Codex 跟随已关闭"
+                });
         for (line, title) in title_lines(title, 24, 3).iter().enumerate() {
             text(&mut e, title, 20, 146 + line as i32 * 21, 18, 220);
         }
@@ -203,7 +207,11 @@ pub fn draw(model: &Model, now: i64, frame: usize) -> Value {
                     t.event.detail.as_str()
                 }
             })
-            .unwrap_or("等待新的 Agent 任务");
+            .unwrap_or(if model.settings.codex_enabled {
+                "在本机 Codex 中开始一个任务"
+            } else {
+                "请在网页开启跟随或接入 Agent"
+            });
         text(
             &mut e,
             &title_lines(detail, 30, 1).join(""),

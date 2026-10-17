@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -292,15 +292,95 @@ fn collect(root: &Path, depth: usize, out: &mut Vec<(PathBuf, u64)>) -> Result<(
             .modified()?
             .duration_since(UNIX_EPOCH)?
             .as_secs();
-        if now.saturating_sub(m) < 7 * 86400 {
+        if now.saturating_sub(m) < 7 * 86400 && !is_subagent_session(&ent.path())? {
             out.push((ent.path(), m));
         }
     }
     Ok(())
 }
+fn is_subagent_session(path: &Path) -> Result<bool> {
+    // Only the first metadata record owns the file. Spawned agents can contain
+    // copied parent metadata, lifecycle events and synthetic parent aborts.
+    // Exclude them before the 24-chat limit as well as before event ingestion.
+    let mut first = Vec::new();
+    BufReader::new(File::open(path)?)
+        .take(1024 * 1024)
+        .read_until(b'\n', &mut first)?;
+    let Ok(meta) = serde_json::from_slice::<Value>(&first) else {
+        return Ok(false);
+    };
+    let source = &meta["payload"]["source"];
+    Ok(meta["type"] == "session_meta"
+        && (source.get("subagent").is_some() || source.as_str() == Some("subagent")))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subagent_history_cannot_stop_parent_or_fill_recent_chat_slots() {
+        let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&root).unwrap();
+        let line = |kind: &str, payload: Value| {
+            format!(
+                "{}\n",
+                serde_json::json!({"type":kind,"timestamp":"2026-10-17T03:00:00Z","payload":payload})
+            )
+        };
+        let parent_meta = line(
+            "session_meta",
+            serde_json::json!({"id":"parent-chat","source":"vscode"}),
+        );
+        let parent_start = line(
+            "event_msg",
+            serde_json::json!({"type":"task_started","turn_id":"parent-turn"}),
+        );
+        fs::write(
+            root.join("parent.jsonl"),
+            format!("{parent_meta}{parent_start}"),
+        )
+        .unwrap();
+        // A real spawned-agent log starts with its own metadata, followed by
+        // copied parent history and a synthetic abort of the parent's turn.
+        for i in 0..25 {
+            let child_meta = line(
+                "session_meta",
+                serde_json::json!({
+                    "id":format!("child-{i}"),
+                    "source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-chat"}}},
+                    "forked_from_id":"parent-chat"
+                }),
+            );
+            let abort = line(
+                "event_msg",
+                serde_json::json!({"type":"turn_aborted","turn_id":"parent-turn"}),
+            );
+            let own_start = line(
+                "event_msg",
+                serde_json::json!({"type":"task_started","turn_id":format!("child-turn-{i}")}),
+            );
+            let done = line(
+                "event_msg",
+                serde_json::json!({"type":"task_complete","turn_id":format!("child-turn-{i}")}),
+            );
+            fs::write(
+                root.join(format!("child-{i}.jsonl")),
+                format!("{child_meta}{parent_meta}{parent_start}{abort}{own_start}{done}"),
+            )
+            .unwrap();
+        }
+        let mut watcher = Watcher::new(root.clone());
+        let events = watcher.scan().unwrap();
+        assert_eq!(
+            events.len(),
+            1,
+            "Only the user-facing parent chat should be tracked"
+        );
+        assert_eq!(events[0].0.task_id, "parent-turn");
+        assert_eq!(events[0].0.thread_id.as_deref(), Some("parent-chat"));
+        assert_eq!(events[0].0.status, Status::Working);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn uses_chat_title_and_waits_for_async_answer_without_publishing_it() {
         use std::io::Write;

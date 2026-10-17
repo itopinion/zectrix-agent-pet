@@ -443,6 +443,12 @@ async fn main() -> Result<()> {
     } else {
         Model::default()
     };
+    if model.migrate_codex_history() {
+        write_private(
+            &root.join("state.json"),
+            &serde_json::to_vec_pretty(&model)?,
+        )?;
+    }
     for t in &mut model.tasks {
         if !t.event.status.terminal() {
             t.stale = true;
